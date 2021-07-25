@@ -1,0 +1,105 @@
+name: Terraform
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+
+jobs:
+  terraform:
+    name:    Terraform
+    runs-on: ubuntu-latest
+
+
+    # Checkout the working repository for the runner
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+
+
+    # Set up AWS credentials
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region:            us-east-1
+
+
+    # Terraform bits
+    - name: Configure Terraform
+      uses: hashicorp/setup-terraform@v1
+
+    - name: Run - terraform format
+      id:   fmt
+      run:  terraform fmt -check
+      continue-on-error: true
+
+    - name: Run - terraform init
+      id:   init
+      run:  terraform init
+      continue-on-error: true
+
+    - name: Run - terraform validate
+      id:   validate
+      run:  terraform validate -no-color
+      continue-on-error: true
+      
+    - name: Run - terraform plan
+      id:   plan
+      if:   ${{ github.event_name == 'pull_request' }}
+      run:  terraform plan -no-color
+      continue-on-error: true
+
+    - name: Update Pull request
+      uses: actions/github-script@v3
+      if:   ${{ github.event_name == 'pull_request' }}
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const output = `\
+          | Format & Style           | Init                      | Validate                      | Plan                      |
+          | ------------------------ | ------------------------- | ----------------------------- | ------------------------- |
+          | ${{ steps.fmt.outcome }} | ${{ steps.init.outcome }} | ${{ steps.validate.outcome }} | ${{ steps.plan.outcome }} |
+          <details>
+          <summary>Show Format</summary>
+
+            \`\`\`
+            ${{ steps.fmt.outputs.stdout }}
+            \`\`\`
+          </details>
+          <details>
+          <summary>Show Init</summary>
+
+            \`\`\`
+            ${{ steps.init.outputs.stdout }}
+            \`\`\`
+          </details>
+          <details>
+          <summary>Show Validate</summary>
+
+            \`\`\`
+            ${{ steps.validate.outputs.stdout }}
+            \`\`\`
+          </details>
+          <details>
+          <summary>Show Plan</summary>
+
+            \`\`\`
+            ${{ steps.plan.outputs.stdout }}
+            \`\`\`
+          </details>
+         
+          github.issues.createComment({
+            issue_number: context.issue.number,
+            owner:        context.repo.owner,
+            repo:         context.repo.repo,
+            body:         output
+          })
+
+    - name: Run - terraform apply
+      if:   ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' && success() }}
+      run:  terraform apply -auto-approve
+      
